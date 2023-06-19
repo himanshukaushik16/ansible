@@ -1,0 +1,2009 @@
+---
+- name: Creating an empty file
+  file:
+    path: /home/testting.txt
+    state: touch
+- name: 1.1.1.1 | PATCH | Ensure mounting of cramfs filesystems is disabled | Edit modprobe config
+  ansible.builtin.lineinfile:
+    path: /etc/modprobe.d/CIS.conf
+    regexp: ^(#)?install cramfs(\s|$)
+    line: install cramfs /bin/true
+    create: true
+    mode: 600
+- name: 1.1.1.1 | PATCH | Ensure mounting of cramfs filesystems is disabled | blacklist
+  ansible.builtin.lineinfile:
+    path: /etc/modprobe.d/blacklist.conf
+    regexp: ^(#)?blacklist cramfs(\s|$)
+    line: blacklist cramfs
+    create: true
+    mode: 600
+# - name: 1.1.1.1 | PATCH | Ensure mounting of cramfs filesystems is disabled | Disable cramfs
+#   community.general.modprobe:
+#     name: cramfs
+#     state: absent
+  
+  when:
+    - rhel8cis_rule_1_1_1_1
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - rule_1.1.1.1
+    - cramfs
+
+- name: 1.1.[2-5] - Ensure /tmp is configured
+  block:
+    - name: Ensure the local-fs directory is created
+      file:
+        path: /etc/systemd/system/local-fs.target.wants
+        state: directory
+        owner: root
+        group: root
+        mode: 755
+        setype: etc_t
+    - name: 1.1.[2-5] - Configure config file for tmpfs
+      blockinfile:
+        path: /etc/systemd/system/local-fs.target.wants/tmp.mount
+        block: |
+          [Mount]
+          What=tmpfs
+          Where=/tmp
+          Type=tmpfs
+          Options=mode=1777,strictatime,noexec,nodev,nosuid
+        create: true
+      notify: restart tmpfs
+  tags:
+    - 1.1.2
+    - 1.1.3
+    - 1.1.4
+    - 1.1.5
+
+- name: 1.1.14 - Report to user if /home does not have nodev set
+  debug:
+    msg: "FAILED CONTROL: /home does not have nodev set"
+  when: mount_options is defined and "nodev" not in mount_options and mount_count
+    == 0
+  changed_when: true
+  tags:
+    - 1.1.14
+- name: 1.1.15 - Report if /dev/shm does not have nodev set
+  block:
+    - name: Determine if /dev/shm has nodev set
+      shell: cat /proc/mounts | /usr/bin/grep /dev/shm | /usr/bin/grep -v nodev
+      register: devshm_nodev_out
+      failed_when: devshm_nodev_out == "2"
+      changed_when: false
+      check_mode: no
+    - name: 1.1.15 - Report to user
+      debug:
+        msg: "FAILED CONTROL: /dev/shm does not have nodev set"
+      when: devshm_nodev_out is defined and devshm_nodev_out.stdout
+      changed_when: true
+  tags:
+    - 1.1.15
+- name: 1.1.16 - Report if /dev/shm does not have nosuid set
+  block:
+    - name: Determine if /dev/shm has nosuid set
+      shell: cat /proc/mounts | /usr/bin/grep /dev/shm | /usr/bin/grep -v nosuid
+      register: devshm_nosuid_out
+      failed_when: devshm_nosuid_out == "2"
+      changed_when: false
+      check_mode: no
+    - name: 1.1.16 - Report to user
+      debug:
+        msg: "FAILED CONTROL: /dev/shm does not have nosuid set"
+      when: devshm_nosuid_out is defined and devshm_nosuid_out.stdout
+      changed_when: true
+  tags:
+    - 1.1.16
+- name: 1.1.21 - Ensure sticky bit is set on world-writeable directories
+  shell: set -o pipefail ; /usr/bin/df --local -P | awk '{if (NR!=1) print $6}' |
+    xargs -I '{}' find '{}' -xdev -type d \( -perm -0002 -a ! -perm -1000 \)
+    2>/dev/null | xargs -I '{}' chmod a+t '{}'
+  changed_when: false
+  tags:
+    - 1.1.21
+- name: 1.3.1 - Ensure sudo is installed
+  dnf:
+    name: sudo
+    state: present
+  tags:
+    - 1.3.1
+- name: 1.3.3 - Ensure sudo log file exists
+  lineinfile:
+    path: /etc/sudoers
+    regexp: ^Defaults\s*logfile="{{ sudo_log }}"
+    line: Defaults logfile="{{ sudo_log }}"
+    insertafter: ^# Defaults specification
+    validate: /usr/sbin/visudo -cf %s
+  tags:
+    - 1.3.3
+
+# - name: 1.6.2 - Ensure address space layout reandomization (ASLR) is enabled
+#   sysctl:
+#     name: kernel.randomize_va_space
+#     value: "2"
+#     reload: yes
+#     state: present
+#     sysctl_set: yes
+#   tags:
+#     - 1.6.2
+
+- name: 1.8.1.1 - Install motd banners
+  copy:
+    src: "{{ motd_file }}"
+    dest: /etc/motd
+    owner: root
+    group: root
+    mode: 644
+  tags:
+    - 1.8.1.1
+    - 1.8.1.4
+
+- name: 1.8.1.2 - Install issue banners
+  copy:
+    src: "{{ issue_file }}"
+    dest: /etc/issue
+    owner: root
+    group: root
+    mode: 644
+  tags:
+    - 1.8.1.2
+    - 1.8.1.5
+
+- name: 1.8.1.3| Ensure GDM banner set up
+  blockinfile:
+    path: /etc/gdm3/greeter.dconf-defaults
+    owner: root
+    group: root
+    mode: 644
+    block: >
+      [org/gnome/login-screen]
+
+      banner-message-enable=true
+
+      banner-message-text='Authorized uses only. All activity may be monitored and reported.'
+  when: graphical_inteface is defined and graphical_interface
+  tags:
+    - 1.8.1.3
+
+- name: 1.8.1.4 - Install motd banners
+  copy:
+    src: "{{ motd_file }}"
+    dest: /etc/motd
+    owner: root
+    group: root
+    mode: 644
+  tags:
+    - 1.8.1.1
+    - 1.8.1.4
+
+- name: 1.8.1.5 - Install issue banners
+  copy:
+    src: "{{ issue_file }}"
+    dest: /etc/issue
+    owner: root
+    group: root
+    mode: 644
+  tags:
+    - 1.8.1.2
+    - 1.8.1.5
+
+- name: 1.8.1.6 - Install issue.net banners
+  copy:
+    src: "{{ issue_file }}"
+    dest: /etc/issue.net
+    owner: root
+    group: root
+    mode: 644
+  tags:
+    - 1.8.1.6
+
+- name: 1.11 - Configure crypto-policy
+  block:
+    - name: 1.11 - Display error if crypto variable violates policy
+      debug:
+        msg:
+          - "crypto_policy is set to: {{ crypto_policy }}. Which is not a valid
+            selection."
+          - Valid choices are DEFAULT, FUTURE, and FIPS.
+          - LEGACY selection does not satisfy the control requirement
+          - Refusing to update crypto_policy information
+      when: crypto_policy is defined and ( crypto_policy != "DEFAULT" and
+        crypto_policy != "FUTURE" and crypto_policy != "FIPS" )
+    - name: 1.11 - Set crypto-policy to {{ crypto_policy | upper | default('DEFAULT',
+        true) }}
+      lineinfile:
+        path: /etc/crypto-policies/config
+        regexp: ^(LEGACY|FUTURE|FIPS|DEFAULT)
+        line: "{{ crypto_policy | upper | default('DEFAULT', true) }}"
+      notify: update crypto_policy
+    - name: 1.11 - Check to see if FIPS mode is already set up if crypto_policy ==
+        FIPS
+      command: /usr/sbin/fips-mode-setup --is-enabled
+      register: fips_mode
+      when: crypto_policy is defined and crypto_policy == "FIPS"
+      failed_when: false
+      changed_when: false
+    - name: 1.11 - Enabling FIPS mode if crypt_policy set to FIPS
+      command: /usr/bin/fips-mode-setup --enable
+      when: ( crypto_policy is defined and crypto_policy == "FIPS") and fips_mode.rc
+        == "2"
+  tags:
+    - 1.11
+
+- name: 2.2.2 | PATCH | Ensure xorg-x11-server-common is not installed
+  ansible.builtin.package:
+    name: xorg-x11-server-common
+    state: absent
+  when:
+    - rhel8cis_rule_2_2_2
+    - "'xorg-x11-server-common' in ansible_facts.packages"
+    - not rhel8cis_xwindows_required or not rhel8cis_gui
+  tags:
+    - level1-server
+    - automated
+    - patch
+    - x11
+    - rule_2.2.2
+- name: "2.2.3 | PATCH | Ensure rsync service is not enabled "
+  ansible.builtin.package:
+    name: rsync
+    state: absent
+  when:
+    - not rhel8cis_rsync_server
+    - "'rsync' in ansible_facts.packages"
+    - rhel8cis_rule_2_2_3
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - rsync
+    - rule_2.2.3
+- name: 2.2.4 | PATCH | Ensure Avahi Server is not installed
+  ansible.builtin.package:
+    name:
+      - avahi-autoipd
+      - avahi
+    state: absent
+  when:
+    - rhel8cis_rule_2_2_4
+    - not rhel8cis_avahi_server
+    - "'avahi' in ansible_facts.packages or 'avahi-autopd' in
+      ansible_facts.packages"
+  tags:
+    - level1-server
+    - level2-workstation
+    - automated
+    - patch
+    - avahi
+    - rule_2.2.4
+- name: 2.2.5 | PATCH | Ensure net-snmp is not installed
+  ansible.builtin.package:
+    name: net-snmp
+    state: absent
+  when:
+    - not rhel8cis_net_snmp_server
+    - "'net-snmp' in ansible_facts.packages"
+    - rhel8cis_rule_2_2_5
+  tags:
+    - level1-server
+    - level1-workstation
+    - automation
+    - patch
+    - snmp
+    - rule_2.2.5
+- name: 2.2.6 | PATCH | Ensure HTTP Proxy Server is not installed
+  ansible.builtin.package:
+    name: squid
+    state: absent
+  when:
+    - not rhel8cis_squid_server
+    - "'squid' in ansible_facts.packages"
+    - rhel8cis_rule_2_2_6
+  tags:
+    - level1-server
+    - level1-workstation
+    - automation
+    - patch
+    - squid
+    - rule_2.2.6
+- name: 2.2.8 | PATCH | Ensure IMAP and POP3 server is not installed
+  ansible.builtin.package:
+    name:
+      - dovecot
+      - cyrus-imapd
+    state: absent
+  when:
+    - not rhel8cis_dovecot_cyrus_server
+    - "'dovecot' in ansible_facts.packages or 'cyrus-imapd' in
+      ansible_facts.packages"
+    - rhel8cis_rule_2_2_8
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - dovecot
+    - imap
+    - pop3
+    - rule_2.2.8
+- name: 2.2.10 | PATCH | Ensure FTP Server is not installed
+  ansible.builtin.package:
+    name: ftp
+    state: absent
+  when:
+    - not rhel8cis_ftp_server
+    - "'ftp' in ansible_facts.packages"
+    - rhel8cis_rule_2_2_10
+  tags:
+    - level1-server
+    - level1-workstation
+    - automation
+    - patch
+    - ftp
+    - rule_2.2.10
+- name: 2.2.11 | PATCH | Ensure DNS Server is not installed
+  ansible.builtin.package:
+    name: bind
+    state: absent
+  when:
+    - not rhel8cis_dns_server
+    - "'bind' in ansible_facts.packages"
+    - rhel8cis_rule_2_2_11
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - dns
+    - rule_2.2.11
+- name: check for slapd service enabled or not
+  shell: service slapd status
+  register: _svc_slapd
+  tags:
+    - rule_2.2.14
+- name: 2.2.15 | PATCH | Ensure DHCP Server is not installed
+  ansible.builtin.package:
+    name: dhcp-server
+    state: absent
+  when:
+    - not rhel8cis_dhcp_server
+    - "'dhcp-server' in ansible_facts.packages"
+    - rhel8cis_rule_2_2_15
+  tags:
+    - level1-server
+    - level1-workstation
+    - audtomated
+    - patch
+    - dhcp
+    - rule_2.2.15
+- name: 2.2.17 | PATCH | Ensure NIS Server is not installed
+  ansible.builtin.package:
+    name: ypserv
+    state: absent
+  when:
+    - not rhel8cis_nis_server
+    - "'ypserv' in ansible_facts.packages"
+    - rhel8cis_rule_2_2_17
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - nis
+    - rule_2.2.17
+- name: 2.2.18 | PATCH | Ensure mail transfer agent is configured for local-only mode
+  ansible.builtin.lineinfile:
+    path: /etc/postfix/main.cf
+    regexp: ^(#)?inet_interfaces
+    line: inet_interfaces = loopback-only
+  notify: restart postfix
+  when:
+    - not rhel8cis_is_mail_server
+    - "'postfix' in ansible_facts.packages"
+    - rhel8cis_rule_2_2_18
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - postfix
+    - rule_2.2.18
+- name: 2.3.1 | PATCH | Ensure NIS Client is not installed
+  ansible.builtin.package:
+    name: ypbind
+    state: absent
+  when:
+    - not rhel8cis_ypbind_required
+    - "'ypbind' in ansible_facts.packages"
+    - rhel8cis_rule_2_3_1
+  tags:
+    - level1-server
+    - level1-workstation
+    - rhel8cis_rule_2_3_1
+    - automated
+    - patch
+    - nis
+    - rule_2.3.1
+- name: 2.3.3 | PATCH | Ensure LDAP client is not installed
+  ansible.builtin.package:
+    name: openldap-clients
+    state: absent
+  when:
+    - not rhel8cis_openldap_clients_required
+    - "'openldap-clients' in ansible_facts.packages"
+    - rhel8cis_rule_2_3_3
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - ldap
+    - rule_2.3.3
+# - name: 3.2.1 - Set networking parameters for host as router communications
+#   block:
+#     - name: 3.2.1- Set ipv4 network parameters (OFF)
+#       sysctl: null
+#       value: "0"
+#       reload: yes
+#       state: present
+#       sysctl_set: yes
+#       loop:
+#         - net.ipv4.conf.all.accept_source_route
+#         - net.ipv4.conf.default.accept_source_route
+#         - net.ipv4.conf.all.accept_redirects
+#         - net.ipv4.conf.default.accept_redirects
+#         - net.ipv4.conf.all.secure_redirects
+#         - net.ipv4.conf.default.secure_redirects
+#       notify: flush network routes
+
+# - name: 3.2.[4-8] - Set ipv4 networking parameters (ON)
+#   sysctl:
+#     name: "{{ item }}"
+#     value: "1"
+#     reload: yes
+#     state: present
+#     sysctl_set: yes
+#     loop:
+#       - net.ipv4.conf.all.log_martians
+#       - net.ipv4.conf.default.log_martians
+#       - net.ipv4.icmp_echo_ignore_broadcasts
+#       - net.ipv4.icmp_ignore_bogus_error_responses
+#       - net.ipv4.conf.all.rp_filter
+#       - net.ipv4.conf.default.rp_filter
+#       - net.ipv4.tcp_syncookies
+#     notify: flush network routes
+
+# - name: 3.2 - Set ipv6 networking parameters (OFF)
+#   sysctl:
+#     name: "{{ item }}"
+#     value: "0"
+#     reload: yes
+#     state: present
+#     sysctl_set: yes
+#     loop:
+#       - net.ipv6.conf.all.accept_source_route
+#       - net.ipv6.conf.default.accept_source_route
+#       - net.ipv6.conf.all.accept_redirects
+#       - net.ipv6.conf.default.accept_redirects
+#       - net.ipv6.conf.all.accept_ra
+#       - net.ipv6.conf.default.accept_ra
+#     notify: flush network routes
+#     when: not ipv6_disable
+#   tags:
+#     - 3.2.0
+#     - 3.2.9
+- name: 3.4.2.3 | PATCH | Ensure iptables-services not installed with nftables
+  block:
+    - name: 3.4.2.3 | PATCH | Ensure iptables-services not installed with nftables |
+        Stop services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: false
+        masked: true
+      ignore_errors: true
+      with_items:
+        - iptables
+        - ip6tables
+    - name: 3.4.2.3 | PATCH | Ensure iptables-services not installed with nftables |
+        Remove IPTables
+      ansible.builtin.package:
+        name: iptables-service
+        state: absent
+  when:
+    - rhel8cis_firewall == "nftables"
+    - rhel8cis_rule_3_4_2_3
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - nftables
+    - rule_3.4.2.3
+- name: 4.3 | PATCH | Ensure logrotate is configured
+  block:
+    - name: 4.3 | AUDIT | Ensure logrotate is configured | Get logrotate settings
+      ansible.builtin.find:
+        paths: /etc/logrotate.d/
+      register: log_rotates
+    - name: 4.3 | PATCH | Ensure logrotate is configured
+      ansible.builtin.replace:
+        path: "{{ item.path }}"
+        regexp: ^(\s*)(daily|weekly|monthly|yearly)$
+        replace: \1{{ rhel8cis_logrotate }}
+      with_items:
+        - "{{ log_rotates.files }}"
+        - path: /etc/logrotate.conf
+      loop_control:
+        label: "{{ item.path }}"
+  when:
+    - rhel8cis_rule_4_3
+  tags:
+    - level1-server
+    - level1-workstation
+    - manual
+    - patch
+    - logrotate
+    - rule_4.3
+- name: 4.2.3 | PATCH | Ensure permissions on all logfiles are configured
+  ansible.builtin.shell: find /var/log -type f -exec chmod g-wx,o-rwx "{}" +
+  failed_when: false
+  when:
+    - rhel8cis_rule_4_2_3
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - logfiles
+    - rule_4.2.3
+- name: 4.2.1.1 | PATCH | Ensure rsyslog installed
+  ansible.builtin.package:
+    name: rsyslog
+    state: present
+  when:
+    - "'rsyslog' not in ansible_facts.packages"
+    - rhel8cis_rule_4_2_1_1
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - rsyslog
+    - rule_4.2.1.1
+- name: 4.2.1.2 | PATCH | Ensure rsyslog Service is enabled
+  ansible.builtin.service:
+    name: rsyslog
+    enabled: true
+  when:
+    - rhel8cis_rule_4_2_1_2
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - rsyslog
+    - rule_4.2.1.2
+- name: 4.2.1.3 | PATCH | Ensure rsyslog default file permissions configured
+  ansible.builtin.lineinfile:
+    path: /etc/rsyslog.conf
+    regexp: ^\$FileCreateMode
+    line: $FileCreateMode 0640
+  notify: restart rsyslog
+  when:
+    - rhel8cis_rule_4_2_1_3
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - rsyslog
+    - rule_4.2.1.3
+- name: 4.2.1.4 | PATCH | Ensure logging is configured
+  block:
+    - name: 4.2.1.4 | AUDIT | Ensure logging is configured | rsyslog current config
+        message out
+      ansible.builtin.shell: cat /etc/rsyslog.conf
+      become: true
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      register: rhel_08_4_2_1_4_audit
+    - name: 4.2.1.4 | AUDIT | Ensure logging is configured | rsyslog current config
+        message out
+      ansible.builtin.debug:
+        msg:
+          - "These are the current logging configurations for rsyslog, please
+            review:"
+          - "{{ rhel_08_4_2_1_4_audit.stdout_lines }}"
+    - name: 4.2.1.4 | PATCH | Ensure logging is configured | mail.* log setting
+      ansible.builtin.blockinfile:
+        path: /etc/rsyslog.conf
+        state: present
+        marker: "# {mark} MAIL LOG SETTINGS (ANSIBLE MANAGED)"
+        block: >
+          # mail logging additions to meet CIS standards
+
+          mail.*                                                  -/var/log/mail
+
+          mail.info                                               -/var/log/mail.info
+
+          mail.warning                                            -/var/log/mail.warning
+
+          mail.err                                                /var/log/mail.err
+        insertafter: "# Log all the mail messages in one place."
+      notify: restart rsyslog
+      when: rhel8cis_rsyslog_ansiblemanaged
+    - name: 4.2.1.4 | PATCH | Ensure logging is configured | news.crit log setting
+      ansible.builtin.blockinfile:
+        path: /etc/rsyslog.conf
+        state: present
+        marker: "# {mark} NEWS LOG SETTINGS (ANSIBLE MANAGED)"
+        block: >
+          # news logging additions to meet CIS standards
+
+          news.crit                                               -/var/log/news/news.crit
+
+          news.notice                                             -/var/log/news/news.crit
+        insertafter: "# Save news errors of level crit and higher in a special file."
+      notify: restart rsyslog
+      when: rhel8cis_rsyslog_ansiblemanaged
+    - name: 4.2.1.4 | PATCH | Ensure logging is configured | Misc. log setting
+      ansible.builtin.blockinfile:
+        path: /etc/rsyslog.conf
+        state: present
+        marker: "# {mark} MISC. LOG SETTINGS (ANSIBLE MANAGED)"
+        block: >
+          # misc. logging additions to meet CIS standards
+
+          *.=warning;*.=err                                        -/var/log/warn
+
+          *.crit                                                   /var/log/warn
+
+          *.*;mail.none;news.none                                  /var/log/messages
+        insertafter: "#### RULES ####"
+      notify: restart rsyslog
+      when: rhel8cis_rsyslog_ansiblemanaged
+    - name: 4.2.1.4 | PATCH | Ensure logging is configured | Local log settings
+      ansible.builtin.blockinfile:
+        path: /etc/rsyslog.conf
+        state: present
+        marker: "#{mark} LOCAL LOG SETTINGS (ANSIBLE MANAGED)"
+        block: >
+          # local log settings to meet CIS standards
+
+          local0,local1.*                                          -/var/log/localmessages
+
+          local2,local3.*                                          -/var/log/localmessages
+
+          local4,local5.*                                          -/var/log/localmessages
+
+          local6,local7.*                                          -/var/log/localmessages
+
+          *.emrg                                                    :omusrmsg:*
+        insertafter: "#### RULES ####"
+      notify: restart rsyslog
+    - name: 4.2.1.4 | PATCH | Ensure logging is configured | Auth Settings
+      ansible.builtin.blockinfile:
+        path: /etc/rsyslog.conf
+        state: present
+        marker: "#{mark} Auth SETTINGS (ANSIBLE MANAGED)"
+        block: >
+          # Private settings to meet CIS standards
+
+          auth,authpriv.*                                          -/var/log/secure
+        insertafter: "#### RULES ####"
+      notify: restart rsyslog
+    - name: 4.2.1.4 | PATCH | Ensure logging is configured | Cron Settings
+      ansible.builtin.blockinfile:
+        path: /etc/rsyslog.conf
+        state: present
+        marker: "#{mark} Cron SETTINGS (ANSIBLE MANAGED)"
+        block: |
+          # Cron settings to meet CIS standards
+          cron.*                                                   /var/log/cron
+        insertafter: "#### RULES ####"
+      notify: restart rsyslog
+  when:
+    - rhel8cis_rule_4_2_1_4
+  tags:
+    - level1-server
+    - level1-workstation
+    - manual
+    - patch
+    - rsyslog
+    - rule_4.2.1.4
+- name: 4.2.1.6 | PATCH | Ensure rsyslog is configured to send logs to a remote
+    log host
+  ansible.builtin.blockinfile:
+    path: /etc/rsyslog.conf
+    state: present
+    block: |
+      # remote host is: name/ip:port, e.g. 192.168.0.1:514, port optional
+      *.* @@{{ rhel8cis_remote_log_server }}
+    insertafter: EOF
+  register: result
+  failed_when:
+    - result is failed
+    - result.rc != 257
+  notify: restart rsyslog
+  when:
+    - rhel8cis_rule_4_2_1_6
+    - rhel8cis_remote_log_server is defined
+  tags:
+    - level1-server
+    - level1-workstation
+    - manual
+    - patch
+    - rsyslog
+    - rule_4.2.1.6
+- name: 4.2.2.1 | PATCH | Ensure journald is configured to send logs to rsyslog
+  ansible.builtin.lineinfile:
+    path: /etc/systemd/journald.conf
+    regexp: ^ForwardToSyslog=
+    line: "#ForwardToSyslog=yes"
+  notify: restart systemd_journal_upload
+  when:
+    - rhel8cis_rule_4_2_2_1
+  tags:
+    - level1-server
+    - level2-workstation
+    - manual
+    - patch
+    - journald
+    - rule_4.2.2.1
+- name: 4.2.2.2 | PATCH | Ensure journald is configured to compress large log files
+  ansible.builtin.lineinfile:
+    path: /etc/systemd/journald.conf
+    regexp: Compress=
+    line: Compress=yes
+    state: present
+    insertafter: ^#Compress
+    validate: /usr/bin/bash -n %s
+  when:
+    - rhel8cis_rule_4_2_2_2
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - journald
+    - rule_4.2.2.2
+- name: 4.2.2.3 | PATCH | Ensure journald is configured to write logfiles to
+    persistent disk
+  ansible.builtin.lineinfile:
+    path: /etc/systemd/journald.conf
+    regexp: Storage=
+    line: Storage=persistent
+    state: present
+    insertafter: ^#Storage
+    validate: /usr/bin/bash -n %s
+  when:
+    - rhel8cis_rule_4_2_2_3
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - journald
+    - rule_4.2.2.3
+- name: 5.1.1 | PATCH | Ensure cron daemon is enabled
+  ansible.builtin.service:
+    name: crond
+    enabled: true
+  when:
+    - rhel8cis_rule_5_1_1
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - cron
+    - rule_5.1.1
+- name: 5.1.2 | PATCH | Ensure permissions on /etc/crontab are configured
+  ansible.builtin.file:
+    path: /etc/crontab
+    owner: root
+    group: root
+    mode: 600
+  when:
+    - rhel8cis_rule_5_1_2
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - cron
+    - rule_5.1.2
+- name: 5.1.3 | PATCH | Ensure permissions on /etc/cron.hourly are configured
+  ansible.builtin.file:
+    path: /etc/cron.hourly
+    state: directory
+    owner: root
+    group: root
+    mode: 700
+  when:
+    - rhel8cis_rule_5_1_3
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - cron
+    - rule_5.1.3
+- name: 5.1.4 | PATCH | Ensure permissions on /etc/cron.daily are configured
+  ansible.builtin.file:
+    path: /etc/cron.daily
+    state: directory
+    owner: root
+    group: root
+    mode: 700
+  when:
+    - rhel8cis_rule_5_1_4
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - cron
+    - rule_5.1.4
+- name: 5.1.5 | PATCH | Ensure permissions on /etc/cron.weekly are configured
+  ansible.builtin.file:
+    path: /etc/cron.weekly
+    state: directory
+    owner: root
+    group: root
+    mode: 700
+  when:
+    - rhel8cis_rule_5_1_5
+  tags:
+    - level1-server
+    - level1-workstation
+    - patch
+    - rule_5.1.5
+- name: 5.1.6 | PATCH | Ensure permissions on /etc/cron.monthly are configured
+  ansible.builtin.file:
+    path: /etc/cron.monthly
+    state: directory
+    owner: root
+    group: root
+    mode: 700
+  when:
+    - rhel8cis_rule_5_1_6
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - rule_5.1.6
+- name: 5.1.7 | PATCH | Ensure permissions on /etc/cron.d are configured
+  ansible.builtin.file:
+    path: /etc/cron.d
+    state: directory
+    owner: root
+    group: root
+    mode: 700
+  when:
+    - rhel8cis_rule_5_1_7
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - cron
+    - rule_5.1.7
+- name: 5.1.8 | PATCH | Ensure cron is restricted to authorized users
+  block:
+    - name: 5.1.8 | PATCH | Ensure cron is restricted to authorized users | Remove
+        cron.deny
+      ansible.builtin.file:
+        path: /etc/cron.deny
+        state: absent
+    - name: 5.1.8 | PATCH | Ensure cron is restricted to authorized users | Check if
+        cron.allow exists
+      ansible.builtin.stat:
+        path: /etc/cron.allow
+      register: rhel8cis_5_1_8_cron_allow_state
+    - name: 5.1.8 | PATCH | Ensure cron is restricted to authorized users | Ensure
+        cron.allow is restricted to authorized users
+      ansible.builtin.file:
+        path: /etc/cron.allow
+        state: '{{ "file" if  rhel8cis_5_1_8_cron_allow_state.stat.exists else "touch"
+          }}'
+        owner: root
+        group: root
+        mode: 600
+  when:
+    - rhel8cis_rule_5_1_8
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - cron
+    - rule_5.1.8
+- name: 5.2.1 | Ensure permissions on /etc/ssh/sshd_config are configured
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config
+    owner: root
+    group: root
+    mode: 600
+  when:
+    - rhel8cis_rule_5_2_1
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - ssh
+    - permissions
+    - rule_5.2.1
+- name: 5.2.3 | PATCH | Ensure permissions on SSH private host key files are
+    configured
+  block:
+    - name: 5.2.3 | AUDIT | Ensure permissions on SSH private host key files are
+        configured | Find the SSH private host keys
+      ansible.builtin.find:
+        paths: /etc/ssh
+        patterns: ssh_host_*_key
+        recurse: true
+        file_type: any
+      register: rhel8cis_5_2_3_ssh_private_host_key
+    - name: 5.2.3 | PATCH | Ensure permissions on SSH private host key files are
+        configured | Set permissions on SSH private host keys
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        owner: root
+        group: root
+        mode: 600
+      with_items:
+        - "{{ rhel8cis_5_2_3_ssh_private_host_key.files }}"
+      loop_control:
+        label: "{{ item.path }}"
+  when:
+    - rhel8cis_rule_5_2_3
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - ssh
+    - permissions
+    - rule_5.2.3
+- name: 5.2.4 | PATCH | Ensure permissions on SSH public host key files are
+    configured
+  block:
+    - name: 5.2.4 | AUDIT | Ensure permissions on SSH public host key files are
+        configured | Find the SSH public host keys
+      ansible.builtin.find:
+        paths: /etc/ssh
+        patterns: ssh_host_*_key.pub
+        recurse: true
+        file_type: any
+      register: rhel8cis_5_2_4_ssh_public_host_key
+    - name: 5.2.4 | PATCH | Ensure permissions on SSH public host key files are
+        configured | Set permissions on SSH public host keys
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        owner: root
+        group: root
+        mode: 644
+      with_items:
+        - "{{ rhel8cis_5_2_4_ssh_public_host_key.files }}"
+      loop_control:
+        label: "{{ item.path }}"
+  when:
+    - rhel8cis_rule_5_2_4
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - ssh
+    - rule_5.2.4
+- name: 5.2.7 | PATCH | Ensure SSH MaxAuthTries is set to 4 or less
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: ^(#)?MaxAuthTries \d
+    line: MaxAuthTries 4
+  when:
+    - rhel8cis_rule_5_2_7
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - ssh
+    - rule_5.2.7
+- name: 5.2.8 | PATCH | Ensure SSH IgnoreRhosts is enabled
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: ^#IgnoreRhosts|^IgnoreRhosts
+    line: IgnoreRhosts yes
+  when:
+    - rhel8cis_rule_5_2_8
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - ssh
+    - rule_5.2.8
+- name: 5.2.11 | PATCH | Ensure SSH PermitEmptyPasswords is disabled
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: ^#PermitEmptyPasswords|^PermitEmptyPasswords
+    line: PermitEmptyPasswords no
+  when:
+    - rhel8cis_rule_5_2_11
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - ssh
+    - rule_5.2.11
+- name: 5.2.12 | PATCH | Ensure SSH PermitUserEnvironment is disabled
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: ^#PermitUserEnvironment|^PermitUserEnvironment
+    line: PermitUserEnvironment no
+  when:
+    - rhel8cis_rule_5_2_12
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - ssh
+    - rule_5.2.12
+- name: 5.2.13 | PATCH | Ensure SSH Idle Timeout Interval is configured
+  block:
+    - name: 5.2.13 | PATCH | Ensure SSH Idle Timeout Interval is configured | Add line
+        in sshd_config for ClientAliveInterval
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: ^ClientAliveInterval
+        line: ClientAliveInterval {{ rhel8cis_sshd['clientaliveinterval'] }}
+    - name: 5.2.13 | PATCH | Ensure SSH Idle Timeout Interval is configured | Ensure
+        SSH ClientAliveCountMax set to <= 3
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: ^ClientAliveCountMax
+        line: ClientAliveCountMax {{ rhel8cis_sshd['clientalivecountmax'] }}
+  when:
+    - rhel8cis_rule_5_2_13
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - ssh
+    - rule_5.2.13
+- name: 5.2.14 | PATCH | Ensure SSH LoginGraceTime is set to one minute or less
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: ^#LoginGraceTime|^LoginGraceTime
+    line: LoginGraceTime {{ rhel8cis_sshd['logingracetime'] }}
+  when:
+    - rhel8cis_rule_5_2_14
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - ssh
+    - rule_5.2.14
+- name: 5.2.15 | PATCH | Ensure SSH warning banner is configured
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: ^Banner
+    line: Banner /etc/issue.net
+    when:
+      - rhel8cis_rule_5_2_15
+  tags:
+    - level1-server
+- name: 5.2.15 | PATCH | Ensure SSH warning banner is configured
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: ^#UsePAM|^UsePAM
+    line: UsePAM yes
+    when:
+      - rhel8cis_rule_5_2_16
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - ssh
+    - rule_5.2.16
+- name: 5.2.18 | PATCH | Ensure SSH MaxStartups is configured
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: ^#MaxStartups|^MaxStartups
+    line: MaxStartups 10:30:60
+    when:
+      - rhel8cis_rule_5_2_18
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - ssh
+    - rule_5.2.18
+- name: 5.2.19 | PATCH | Ensure SSH MaxSessions is set to 10 or less
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: ^#MaxSessions|^MaxSessions
+    line: MaxSessions {{ rhel8cis_ssh_maxsessions }}
+    when:
+      - rhel8cis_rule_5_2_19
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - ssh
+    - rule_5.2.19
+- name: 5.2.20 | PATCH | Ensure system-wide crypto policy is not over-ridden
+  block:
+    - name: 5.2.20 | AUDIT | Ensure system-wide crypto policy is not over-ridden
+      ansible.builtin.shell: grep -i '^\s*CRYPTO_POLICY=' /etc/sysconfig/sshd
+      failed_when: ( crypto_policy_override.rc not in [ 0, 1 ] )
+      changed_when: false
+      register: crypto_policy_override
+    - name: 5.2.20 | PATCH | Ensure system-wide crypto policy is not over-ridden
+      ansible.builtin.shell: sed -ri "s/^\s*(CRYPTO_POLICY\s*=.*)$/# \1/" /etc/sysconfig/sshd
+      notify: restart sshd
+      when:
+        - crypto_policy_override.stdout | length > 0
+        - rhel8cis_rule_5_2_20
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - ssh
+    - rule_5.2.20
+- name: 5.4.1 - Configure PAM files and password requirements
+  block:
+    - name: 5.4.1 - require at least one digit in passwords
+      lineinfile:
+        path: /etc/security/pwquality.conf
+        line: dcredit = -1
+        regexp: ^dcredit = -1
+        insertafter: "# dcredit = 0"
+      when: password_req_digit
+    - name: 5.4.1 - require at least one uppercase letter in passwords
+      lineinfile:
+        path: /etc/security/pwquality.conf
+        line: ucredit = -1
+        regexp: ^ucredit = -1
+        insertafter: "# ucredit = 0"
+      when: password_req_upper
+    - name: 5.4.1 - require at least one lowercase letter in passwords
+      lineinfile:
+        path: /etc/security/pwquality.conf
+        line: lcredit = -1
+        regexp: ^lcredit = -1
+        insertafter: ^# lcredit = 0
+      when: password_req_lower
+    - name: 5.4.1 - Require at least one special character in passwords
+      lineinfile:
+        path: /etc/security/pwquality.conf
+        line: ocredit = -1
+        regexp: ^ocredit = -1
+        insertafter: ^# ocredit = 0
+      when: password_req_digit
+    - name: 5.4.1 - Require at least {{ password_min_length }} characters in passwords
+      lineinfile:
+        path: /etc/security/pwquality.conf
+        line: minlen = {{ password_min_length }}
+        regexp: ^minlen = {{ password_min_length }}
+        insertafter: ^# minlen = 8
+      when: password_req_digit
+  tags:
+    - 5.4.1
+- name: 5.4.3 | check age of user password
+  lineinfile:
+    path: /etc/pam.d/system-auth
+    line: search the line of age of password
+    when: result.stdout != ""
+  tags:
+    - 5.4.3
+    - 5.4.4
+- name: 5.4.3 |  Ensure password reuse is limited | delete possible duplicate lines
+  lineinfile:
+    dest: /etc/pam.d/common-password
+    regexp: ^password.*pam_pwhistory\.so.*remember.*
+    state: absent
+  tags:
+    - section5
+    - level_1_server
+    - level_1_workstation
+    - 5.4.3
+- name: 5.4.3 |  Ensure password reuse is limited | update file according to CIS
+  lineinfile:
+    dest: /etc/pam.d/common-password
+    line: password required pam_pwhistory.so remember=5
+    insertafter: ^password\s+?requisite.*
+    state: present
+    firstmatch: true
+  tags:
+    - section5
+    - level_1_server
+    - level_1_workstation
+    - 5.4.3
+- name: 5.4.4 | Ensure password hashing algorithm is SHA-512
+  lineinfile:
+    dest: /etc/pam.d/common-password
+    regexp: ^password\s+\[success(.*)(md5|blowfish|bigcrypt|sha256|sha512)(.*)$
+    line: password [success\1 sha512 \3
+    backrefs: true
+  tags:
+    - section5
+    - level_1_server
+    - level_1_workstation
+    - 5.4.4
+- name: 5.5.1.5 | Ensure all users last password change date is in the past
+  block:
+    - name: 5.5.1.5 | Ensure all users last password change date is in the past | get
+        list
+      shell: >
+        awk -F: '{print $1}' /etc/shadow | while read -r user
+
+        do
+          if [[ $(date --date="$(chage --list "$user" | grep '^Last password change' | cut -d: -f2)" +%s) > $(date +%s) ]];then
+            echo "$user"
+          fi
+        done
+      register: output_5_4_1_5
+    - name: 5.5.1.5 Ensure all users last password change date is in the past | save
+        list
+      copy:
+        dest: "{{ outputfiles }}/5.5.1.5"
+        content: "{{ output_5_4_1_5.stdout_lines }}"
+  tags:
+    - section5
+    - level_1_server
+    - level_1_workstation
+    - 5.5.1.5
+    - manual
+- name: 5.5.2 | PATCH | Ensure system accounts are secured | pre RHEL8.2
+  block:
+    - name: 5.5.2 | PATCH | Ensure lockout for failed password attempts is configured
+        | pre RHEL8.2 | Add deny count and unlock time for preauth
+      ansible.builtin.lineinfile:
+        path: /etc/pam.d/{{ item }}
+        state: present
+        regexp: ^auth\s*required\s*pam_faillock.so preauth
+        line: auth        required                                     pam_faillock.so
+          preauth silent deny={{ rhel8cis_pam_faillock.attempts }}{{
+          (rhel8cis_pam_faillock.fail_for_root) | ternary(' even_deny_root ','
+          ') }}unlock_time={{ rhel8cis_pam_faillock.unlock_time }}
+        insertafter: ^#?auth ?
+      with_items:
+        - system-auth
+        - password-auth
+      when: ansible_distribution_version <= "8.1"
+    - name: 5.5.2 | PATCH | Ensure lockout for failed password attempts is configured
+        | pre RHEL8.2 | Add deny count and unlock times for authfail
+      ansible.builtin.lineinfile:
+        dest: /etc/pam.d/{{ item }}
+        state: present
+        regexp: ^auth\s*required\s*pam_faillock.so authfail
+        line: auth        required                                     pam_faillock.so
+          authfail deny={{ rhel8cis_pam_faillock.attempts }}{{
+          (rhel8cis_pam_faillock.fail_for_root) | ternary(' even_deny_root ','
+          ') }}unlock_time={{ rhel8cis_pam_faillock.unlock_time }}
+        insertafter: ^#?auth ?
+      with_items:
+        - system-auth
+        - password-auth
+      when: ansible_distribution_version <= "8.1"
+    - name: "5.5.2 | PATCH | Ensure system accounts are secured | RHEL8.2+ "
+      ansible.builtin.lineinfile:
+        path: /etc/security/faillock.conf
+        state: present
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      with_items:
+        - regexp: ^\s*deny\s*=\s*[1-5]\b
+          line: deny = 5
+        - regexp: ^\s*unlock_time\s*=\s*(0|9[0-9][0-9]|[1-9][0-9][0-9][0-9]+)\b
+          line: unlock_time = 900
+      when: ansible_distribution_version >= "8.2"
+  when:
+    - rhel8cis_rule_5_5_2
+  tags:
+    - level1-server
+    - level1-workstation
+    - patch
+    - rule_5.5.2
+- name: 5.5.4 - Ensure default group for root is GID 0
+  command: /usr/sbin/usermod -g 0 root
+  changed_when: false
+  tags:
+    - 5.5.4
+- name: 5.5.5 - Ensure umask is set
+  replace:
+    path: "{{ item }}"
+    replace: "     umask {{ default_umask }}"
+    regexp: ^\s*umask\s*022
+  loop:
+    - /etc/bashrc
+    - /etc/profile
+  tags:
+    - 5.5.5
+- name: 6.1.2 | PATCH | Ensure permissions on /etc/passwd are configured
+  ansible.builtin.file:
+    path: /etc/passwd
+    owner: root
+    group: root
+    mode: 644
+  when:
+    - rhel8cis_rule_6_1_2
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - permissions
+    - rule_6.1.2
+- name: 6.1.3 | PATCH | Ensure permissions on /etc/shadow are configured
+  ansible.builtin.file:
+    path: /etc/shadow
+    owner: root
+    group: root
+    mode: 0
+  when:
+    - rhel8cis_rule_6_1_3
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - permissions
+    - rule_6.1.3
+- name: 6.1.4 | PATCH |  Ensure permissions on /etc/group are configured
+  ansible.builtin.file:
+    path: /etc/group
+    owner: root
+    group: root
+    mode: 644
+  when:
+    - rhel8cis_rule_6_1_4
+    - ansible_distribution_version >= "8.2"
+    - rhel8cis_rule_5_5_2
+  tags:
+    - level1-server
+    - level1-workstation
+    - regexp: ^\s*deny\s*=\s*[1-5]\b
+      line: deny = 5
+    - regexp: ^\s*unlock_time\s*=\s*(0|9[0-9][0-9]|[1-9][0-9][0-9][0-9]+)\b
+      line: unlock_time = 900
+    - level1-server
+    - level1-workstation
+    - patch
+    - rule_5.5.2
+- name: 6.1.2 | PATCH | Ensure permissions on /etc/passwd are configured
+  ansible.builtin.file:
+    path: /etc/passwd
+    owner: root
+    group: root
+    mode: 644
+  when:
+    - rhel8cis_rule_6_1_2
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - permissions
+    - rule_6.1.2
+- name: 6.1.3 | PATCH | Ensure permissions on /etc/shadow are configured
+  ansible.builtin.file:
+    path: /etc/shadow
+    owner: root
+    group: root
+    mode: 0
+  when:
+    - rhel8cis_rule_6_1_3
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - permissions
+    - rule_6.1.3
+- name: 6.1.4 | PATCH |  Ensure permissions on /etc/group are configured
+  ansible.builtin.file:
+    path: /etc/group
+    owner: root
+    group: root
+    mode: 644
+  when:
+    - rhel8cis_rule_6_1_4
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - permissions
+    - rule_6.1.4
+- name: 6.1.5 | PATCH | Ensure permissions on /etc/gshadow are configured
+  ansible.builtin.file:
+    path: /etc/gshadow
+    owner: root
+    group: root
+    mode: 0
+  when:
+    - rhel8cis_rule_6_1_5
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - permissions
+    - rule_6.1.5
+- name: 6.1.6 | PATCH | Ensure permissions on /etc/passwd- are configured
+  ansible.builtin.file:
+    path: /etc/passwd-
+    owner: root
+    group: root
+    mode: 644
+  when:
+    - rhel8cis_rule_6_1_6
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - permissions
+    - rule_6.1.6
+- name: 6.1.7 | PATCH | Ensure permissions on /etc/shadow- are configured
+  ansible.builtin.file:
+    path: /etc/shadow-
+    owner: root
+    group: root
+    mode: 0
+  when:
+    - rhel8cis_rule_6_1_7
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - permissions
+    - rule_6.1.7
+- name: 6.1.8 | PATCH | Ensure permissions on /etc/group- are configured
+  ansible.builtin.file:
+    path: /etc/group-
+    owner: root
+    group: root
+    mode: 644
+  when:
+    - rhel8cis_rule_6_1_8
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - permissionss
+    - rule_6.1.8
+- name: 6.1.9 | PATCH | Ensure permissions on /etc/gshadow- are configured
+  ansible.builtin.file:
+    path: /etc/gshadow-
+    owner: root
+    group: root
+    mode: 0
+  when:
+    - rhel8cis_rule_6_1_9
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - permissions
+    - rule_6.1.9
+- name: 6.1.11 | AUDIT | Ensure no unowned files or directories exist
+  block:
+    - name: 6.1.11 | AUDIT | Ensure no unowned files or directories exist | Finding
+        all unowned files or directories
+      ansible.builtin.shell: find "{{ item.mount }}" -xdev -nouser
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      register: rhel_08_6_1_11_audit
+      with_items: "{{ ansible_mounts }}"
+      loop_control:
+        label: "{{ item.mount }}"
+      when: item['device'].startswith('/dev') and not 'bind' in item['options']
+    - name: 6.1.11 | AUDIT | Ensure no unowned files or directories exist | set fact
+      ansible.builtin.set_fact:
+        rhel_08_6_1_11_unowned_files_found: true
+      loop: "{{ rhel_08_6_1_11_audit.results }}"
+      when: item.stdout | length > 0
+    - name: 6.1.11 | AUDIT | Ensure no unowned files or directories exist | Displaying
+        any unowned files or directories
+      ansible.builtin.debug:
+        msg: Warning -- missing owner on items in {{ rhel_08_6_1_11_audit |
+          json_query('results[*].stdout_lines[*]') | flatten }}
+      when:
+        - rhel_08_6_1_11_unowned_files_found
+    - name: 6.1.11 | AUDIT | Ensure no unowned files or directories exist | Warn Count
+      ansible.builtin.import_tasks: warning_facts.yml
+      vars:
+        warn_control_id: 6.1.12
+      when: rhel_08_6_1_11_unowned_files_found
+  vars:
+    rhel_08_6_1_11_unowned_files_found: false
+  when:
+    - rhel8cis_rule_6_1_11
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - audit
+    - files
+    - permissions
+    - rule_6.1.11
+- name: 6.1.12 | AUDIT | Ensure no ungrouped files or directories exist
+  block:
+    - name: 6.1.12 | AUDIT | Ensure no ungrouped files or directories exist | Finding
+        all ungrouped files or directories
+      ansible.builtin.shell: find "{{ item.mount }}" -xdev -nogroup
+      check_mode: false
+      failed_when: false
+      changed_when: false
+      register: rhel_08_6_1_12_audit
+      with_items: "{{ ansible_mounts }}"
+      loop_control:
+        label: "{{ item.mount }}"
+      when: item['device'].startswith('/dev') and not 'bind' in item['options']
+    - name: 6.1.12 | AUDIT | Ensure no ungrouped files or directories exist | set fact
+      ansible.builtin.set_fact:
+        rhel_08_6_1_12_ungrouped_files_found: true
+      loop: "{{ rhel_08_6_1_12_audit.results }}"
+      when: item.stdout | length > 0
+    - name: 6.1.12 | AUDIT | Ensure no ungrouped files or directories exist |
+        Displaying all ungrouped files or directories
+      ansible.builtin.debug:
+        msg: Warning!! -- Missing group on items in {{ rhel_08_6_1_12_audit |
+          json_query('results[*].stdout_lines[*]') | flatten }}
+      when: rhel_08_6_1_12_ungrouped_files_found
+    - name: 6.1.12 | AUDIT | Ensure no ungrouped files or directories exist | Warn
+        Count
+      ansible.builtin.import_tasks: warning_facts.yml
+      vars:
+        warn_control_id: 6.1.12
+      when: rhel_08_6_1_12_ungrouped_files_found
+  vars:
+    rhel_08_6_1_12_ungrouped_files_found: false
+  when:
+    - rhel8cis_rule_6_1_12
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - audit
+    - files
+    - permissions
+    - rule_6.1.12
+- name: 6.1.13 | AUDIT | Audit SUID executables
+  block:
+    - name: 6.1.13 | AUDIT | Audit SUID executables | Find all SUID executables
+      ansible.builtin.shell: df {{ item.mount }} -P | awk {'if (NR!=1) print $6'} |
+        xargs -I '{}' find '{}' -xdev -type f -perm -4000
+      failed_when: false
+      changed_when: false
+      register: rhel_08_6_1_13_suid_perms
+      with_items: "{{ ansible_mounts }}"
+      loop_control:
+        label: "{{ item.mount }}"
+    - name: 6.1.13 | AUDIT | Audit SUID executables | set fact SUID executables
+      ansible.builtin.set_fact:
+        rhel8cis_6_1_13_suid_found: true
+      loop: "{{ rhel_08_6_1_13_suid_perms.results }}"
+      when: item.stdout | length > 0
+    - name: 6.1.13 | AUDIT | Audit SUID executables |  Alert SUID executables exist
+      ansible.builtin.debug:
+        msg: Warning!! -- SUID set on items in {{ rhel_08_6_1_13_suid_perms |
+          json_query('results[*].stdout_lines[*]') | flatten }}
+      when: rhel8cis_6_1_13_suid_found
+    - name: 6.1.13 | AUDIT | Audit SUID executables | Warn Count
+      ansible.builtin.import_tasks: warning_facts.yml
+      vars:
+        warn_control_id: 6.1.13
+      when: rhel8cis_6_1_13_suid_found
+  vars:
+    rhel8cis_6_1_13_suid_found: false
+  when:
+    - rhel8cis_rule_6_1_13
+  tags:
+    - level1-server
+    - level1-workstation
+    - manual
+    - audit
+    - files
+    - rule_6.1.13
+- name: 6.1.14 | AUDIT | Audit SGID executables
+  block:
+    - name: 6.1.14 | AUDIT | Audit SGID executables | Find all SGID executables
+      ansible.builtin.shell: df {{ item.mount }} -P | awk {'if (NR!=1) print $6'} |
+        xargs -I '{}' find '{}' -xdev -type f -perm -2000
+      failed_when: false
+      changed_when: false
+      register: rhel_08_6_1_14_sgid_perms
+      loop: "{{ ansible_mounts }}"
+      loop_control:
+        label: "{{ item.mount }}"
+    - name: 6.1.14 | AUDIT | Audit SGID executables | Set fact SGID executables
+      ansible.builtin.set_fact:
+        rhel8cis_6_1_14_sgid_found: true
+      loop: "{{ rhel_08_6_1_14_sgid_perms.results }}"
+      when: item.stdout | length > 0
+    - name: 6.1.14 | AUDIT | Audit SGID executables |  Alert SGID executables exist
+      ansible.builtin.debug:
+        msg: Warning!! -- SGID set on items in {{ rhel_08_6_1_14_sgid_perms |
+          json_query('results[*].stdout_lines[*]') | flatten }}
+      when: rhel8cis_6_1_14_sgid_found
+    - name: 6.1.14 | AUDIT | Audit SGID executables | Warn Count
+      ansible.builtin.import_tasks: warning_facts.yml
+      vars:
+        warn_control_id: 6.1.14
+      when: rhel8cis_6_1_14_sgid_found
+  vars:
+    rhel8cis_6_1_14_guid_found: false
+  when:
+    - rhel8cis_rule_6_1_14
+  tags:
+    - level1-server
+    - level1-workstation
+    - manual
+    - audit
+    - files
+    - rule_6.1.14
+- name: 6.2.1 | PATCH | Ensure password fields are not empty
+  ansible.builtin.shell: passwd -l {{ item }}
+  changed_when: false
+  failed_when: false
+  with_items: "{{ empty_password_accounts.stdout_lines }}"
+  when:
+    - empty_password_accounts.rc
+    - rhel8cis_rule_6_2_1
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - accounts
+    - rule_6.2.1
+- name: 6.2.[2,4-5] - Ensure no legacy + entries exist in password files
+  lineinfile:
+    regexp: ^\+:.*
+    state: absent
+    path: "{{ item }}"
+    when: ypbind is defined and not ypbind
+  loop:
+    - /etc/passwd
+    - /etc/shadow
+    - /etc/group
+  tags:
+    - 6.2.2
+    - 6.2.4
+    - 6.2.5
+- name: 6.2.3 | PATCH | Ensure root PATH Integrity
+  block:
+    - name: 6.2.3 | AUDIT | Ensure root PATH Integrity | Determine empty value
+      ansible.builtin.shell: "echo $PATH | grep ::"
+      changed_when: false
+      failed_when: rhel8cis_6_2_3_path_colon.rc == 0
+      check_mode: false
+      register: rhel8cis_6_2_3_path_colon
+    - name: 6.2.3 | AUDIT | Ensure root PATH Integrity | Determin colon end
+      ansible.builtin.shell: echo $PATH | grep :$
+      changed_when: false
+      failed_when: rhel8cis_6_2_3_path_colon_end.rc == 0
+      check_mode: false
+      register: rhel8cis_6_2_3_path_colon_end
+    - name: 6.2.3 | AUDIT | Ensure root PATH Integrity | Determine dot in path
+      ansible.builtin.shell: /bin/bash --login -c 'env | grep ^PATH=' | sed -e
+        's/PATH=//' -e 's/::/:/' -e 's/:$//' -e 's/:/\n/g'
+      changed_when: false
+      failed_when: '"." in rhel8cis_6_2_3_dot_in_path.stdout_lines'
+      check_mode: false
+      register: rhel8cis_6_2_3_dot_in_path
+    - name: 6.2.3 | AUDIT | Ensure root PATH Integrity | Alert on empty value, colon
+        end, and dot in path
+      ansible.builtin.debug:
+        msg:
+          - "The following paths have an empty value: {{
+            rhel8cis_6_2_3_path_colon.stdout_lines }}"
+          - "The following paths have colon end: {{
+            rhel8cis_6_2_3_path_colon_end.stdout_lines }}"
+          - "The following paths have a dot in the path: {{
+            rhel8cis_6_2_3_dot_in_path.stdout_lines }}"
+    - name: 6.2.3 | PATCH | Ensure root PATH Integrity | Determine rights and owner
+      ansible.builtin.file: |
+        path='{{ item }}' follow=yes state=directory owner=root mode='o-w,g-w'
+      with_items: "{{ rhel8cis_6_2_3_dot_in_path.stdout_lines }}"
+  when:
+    - rhel8cis_rule_6_2_3
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - paths
+    - rule_6.2.3
+- name: 6.2.7 | PATCH | Ensure users' home directories permissions are 750 or more
+    restrictive
+  block:
+    - name: 6.2.7 | AUDIT | Ensure users' home directories permissions are 750 or more
+        restrictive
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      with_items: "{{ rhel8cis_passwd | selectattr('uid', '>=',
+        rhel8uid_interactive_uid_start | int) | selectattr('uid', '<=',
+        rhel8uid_interactive_uid_stop | int) | map(attribute='dir') | list }}"
+      register: rhel_08_6_2_7_audit
+    - name: 6.2.7 | AUDIT | Ensure users' home directories permissions are 750 or more
+        restrictive
+      ansible.builtin.shell: find -H {{ item.0 | quote }} -not -type l -perm /027
+      check_mode: false
+      changed_when: rhel_08_6_2_7_patch_audit.stdout | length > 0
+      register: rhel_08_6_2_7_patch_audit
+      when:
+        - ansible_check_mode
+        - item.1.exists
+      with_together:
+        - "{{ rhel_08_6_2_7_audit.results | map(attribute='item') | list }}"
+        - "{{ rhel_08_6_2_7_audit.results | map(attribute='stat') | list }}"
+      loop_control:
+        label: "{{ item.0 }}"
+    - name: 6.2.7 | PATCH | Ensure users' home directories permissions are 750 or more
+        restrictive
+      ansible.builtin.file:
+        path: "{{ item.0 }}"
+        recurse: true
+        mode: a-st,g-w,o-rwx
+      register: rhel_08_6_2_7_patch
+      when:
+        - not ansible_check_mode
+        - item.1.exists
+      with_together:
+        - "{{ rhel_08_6_2_7_audit.results | map(attribute='item') | list }}"
+        - "{{ rhel_08_6_2_7_audit.results | map(attribute='stat') | list }}"
+      loop_control:
+        label: "{{ item.0 }}"
+
+# - name: 6.2.7 | PATCH | Ensure users' home directories permissions are 750 or more restrictive
+#   ansible.posix.acl:
+#     path: "{{ item.0 }}"
+#     default: true
+#     state: present
+#     recursive: true
+#     etype: "{{ item.1.etype }}"
+#     permissions: "{{ item.1.mode }}"
+#   when:
+#     - not system_is_container
+#     - rhel8cis_rule_6_2_7
+#   with_nested:
+#     - "{{ (ansible_check_mode | ternary(rhel_08_6_2_7_patch_audit,
+#       rhel_08_6_2_7_patch)).results | rejectattr('skipped', 'defined') |
+#       map(attribute='item') | map('first') | list }}"
+#     - - etype: group
+#         mode: rx
+#       - etype: other
+#         mode: "0"
+#   tags:
+#     - level1-server
+#     - level1-workstation
+#     - automated
+#     - patch
+#     - users
+#     - permissions
+#     - rule_6.2.7
+
+- name: 6.2.10 | PATCH | Ensure users own their home directories
+  ansible.builtin.file:
+    path: "{{ item.dir }}"
+    owner: "{{ item.id }}"
+    state: directory
+  with_items: "{{ rhel8cis_passwd }}"
+  loop_control:
+    label: "{{ rhel8cis_passwd_label }}"
+  when:
+    - item.uid >= rhel8uid_interactive_uid_start|int
+    - item.id != 'nobody'
+    - item.dir != '/dev/null'
+    - rhel8cis_rule_6_2_8
+  tags:
+    - skip_ansible_lint
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - users
+    - rule_6.2.8
+- name: 6.2.9 | PATCH | Ensure users' dot files are not group or world-writable
+  block:
+    - name: 6.2.9 | AUDIT | Ensure users' dot files are not group or world-writable |
+        Check for files
+      ansible.builtin.shell: find /home/ -maxdepth 2 -name "\.*" -perm /g+w,o+w
+      changed_when: false
+      failed_when: false
+      register: rhel8cis_6_2_9_audit
+    - name: 6.2.9 | PATCH | Ensure users' dot files are not group or world-writable |
+        Changes files if configured
+      ansible.builtin.file:
+        path: "{{ item }}"
+        mode: go-w
+      with_items: "{{ rhel8cis_6_2_9_audit.stdout_lines }}"
+      when:
+        - rhel8cis_6_2_9_audit.stdout is defined
+        - rhel8cis_dotperm_ansiblemanaged
+  when:
+    - rhel8cis_rule_6_2_9
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - users
+    - permissions
+    - rule_6.2.9
+- name: 6.2.10 | PATCH | Ensure no users have .forward files
+  ansible.builtin.file:
+    path: ~{{ item }}/.forward
+    state: absent
+  with_items:
+    - "{{ users.stdout_lines }}"
+  when:
+    - rhel8cis_rule_6_2_10
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - users
+    - files
+    - rule_6.2.10
+- name: 6.2.11 | PATCH | Ensure no users have .netrc files
+  ansible.builtin.file:
+    path: ~{{ item }}/.netrc
+    state: absent
+  with_items:
+    - "{{ users.stdout_lines }}"
+  when:
+    - rhel8cis_rule_6_2_11
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - users
+    - files
+    - rule_6.2.11
+- name: 6.2.12 | PATCH | Ensure users' .netrc Files are not group or world accessible
+  ansible.builtin.shell: /bin/true
+  changed_when: false
+  failed_when: false
+  when:
+    - rhel8cis_rule_6_2_12
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - users
+    - permissions
+    - notimplemented
+    - rule_6.2.12
+- name: 6.2.13 | PATCH | Ensure no users have .rhosts files
+  ansible.builtin.file:
+    path: ~{{ item }}/.rhosts
+    state: absent
+  with_items: "{{ users.stdout_lines }}"
+  when:
+    - rhel8cis_rule_6_2_13
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - patch
+    - users
+    - files
+    - rule_6.2.13
+- name: 6.2.14 | AUDIT | Ensure all groups in /etc/passwd exist in /etc/group
+  block:
+    - name: 6.2.14 | AUDIT | Ensure all groups in /etc/passwd exist in /etc/group |
+        Check /etc/passwd entries
+      ansible.builtin.shell: pwck -r | grep 'no group' | awk '{ gsub("[:\47]",""); print $2}'
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      register: rhel8cis_6_2_14_passwd_gid_check
+    - name: 6.2.14 | AUDIT | Ensure all groups in /etc/passwd exist in /etc/group |
+        Print warning about users with invalid GIDs missing GID entries in
+        /etc/group
+      ansible.builtin.debug:
+        msg: "Warning!! The following users have non-existent GIDs (Groups): {{
+          rhel8cis_6_2_14_passwd_gid_check.stdout_lines | join (', ') }}"
+      when: rhel8cis_6_2_14_passwd_gid_check.stdout | length > 0
+    - name: 6.2.14 | AUDIT | Ensure all groups in /etc/passwd exist in /etc/group |
+        Warn Count
+      ansible.builtin.import_tasks: warning_facts.yml
+      vars:
+        warn_control_id: 6.2.14
+      when: rhel8cis_6_2_14_passwd_gid_check.stdout | length > 0
+  when:
+    - rhel8cis_rule_6_2_14
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - audit
+    - accounts
+    - groups
+    - rule_6.2.14
+- name: 6.2.15 | AUDIT Ensure no duplicate UIDs exist
+  block:
+    - name: 6.2.15 | AUDIT | Ensure no duplicate UIDs exist | Check for duplicate UIDs
+      ansible.builtin.shell: "pwck -r | awk -F: '{if ($3 in uid) print $1 ; else
+        uid[$3]}' /etc/passwd"
+      changed_when: false
+      failed_when: false
+      register: rhel8cis_6_2_15_user_uid_check
+- name: 6.2.18 | AUDIT | Ensure no duplicate group names exist | Print warning
+    about users with duplicate group names
+  ansible.builtin.debug:
+    msg: "Warning!! The following group names are duplicates: {{
+      rhel8cis_6_2_18_group_group_check.stdout_lines }}"
+    when: rhel8cis_6_2_18_group_group_check.stdout | length > 0
+- name: 6.2.18 | AUDIT | Ensure no duplicate group names exist | Warn count
+  ansible.builtin.import_tasks: warning_facts.yml
+  vars:
+    warn_control_id: 6.2.18
+    when: rhel8cis_6_2_18_group_group_check.stdout | length > 0
+  when:
+    - rhel8cis_rule_6_2_18
+  tags:
+    - level1-server
+    - level1-workstation
+    - automated
+    - audit
+    - accounts
+    - groups
+    - rule_6.2.18
+- name: 6.2.19 - Report on shadow group in /etc/group
+  block:
+    - name: 6.2.19 - Determine if the shadow group exists in /etc/group
+      command: /usr/bin/grep "^shadow:" /etc/group
+      register: shadow_out
+      changed_when: false
+      failed_when: shadow_out.rc == "2"
+      check_mode: no
+    - name: 6.2.19 - Print report of shadow group to user
+      debug:
+        msg: Shadow group exists in /etc/group. Remove
+      changed_when: true
+      when: shadow_out.stdout
+
+# - name: 4.2.2.1 | PATCH | Ensure journald is configured to send logs to rsyslog
+#   ansible.builtin.lineinfile:
+#     path: /etc/systemd/journald.conf
+#     regexp: ^#ForwardToSyslog=|^ForwardToSyslog=
+#     line: ForwardToSyslog=yes
+#   when:
+#     - rhel8cis_rule_4_2_2_1
+#   tags:
+#     - level1-server
+#     - level1-workstation
+#     - manual
+#     - patch
+#     - rule_4.2.2.1
